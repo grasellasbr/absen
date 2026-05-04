@@ -1,60 +1,65 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Presensi Kelas</title>
-
-<style>
-body { font-family: sans-serif; text-align: center; background:#f5f7fb; }
-input, button { padding:10px; margin:5px; width:80%; }
-video, img { width:300px; border-radius:12px; }
-#status { margin-top:10px; font-weight:bold; }
-</style>
-</head>
-
-<body>
-
-<h2>PRESENSI KELAS</h2>
-
-<input type="text" id="nama" placeholder="Nama">
-<input type="text" id="nim" placeholder="NIM">
-
-<br>
-
-<video id="video" autoplay></video>
-<img id="hasil" style="display:none;">
-
-<br>
-
-<button onclick="ambilFoto()">📸 Ambil Foto</button>
-<button onclick="ulangFoto()">🔄 Ulang</button>
-
-<br>
-
-<button onclick="absen()">✅ Tandai Hadir</button>
-
-<p id="lokasi">📍 Mendeteksi lokasi...</p>
-<p id="status"></p>
+<!-- BAGIAN HTML & CSS SAMA PERSIS PUNYA KAMU (TIDAK DIUBAH) -->
+<!-- AKU HANYA UBAH BAGIAN SCRIPT -->
 
 <script>
 let foto = null;
 let lat = null;
 let lon = null;
-let timestamp = null;
+let frozenTime = null;
 
 // 📍 KOORDINAT KELAS
 const kelasLat = -6.929684430614102;
 const kelasLon = 107.7688228275042;
 const radius = 0.0001;
 
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const canvasImg = document.getElementById('canvas-img');
+const btnSnap = document.getElementById('btn-snap');
+const btnRetake = document.getElementById('btn-retake');
+const liveIndicator = document.getElementById('live-indicator');
+
+// =======================
+// 📍 LOKASI
+// =======================
+navigator.geolocation.getCurrentPosition(
+  pos => {
+    lat = pos.coords.latitude;
+    lon = pos.coords.longitude;
+
+    document.getElementById("input-lokasi").value =
+      `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+  },
+  err => {
+    alert("❌ Lokasi tidak diizinkan");
+  },
+  {
+    enableHighAccuracy: true,
+    timeout: 10000,
+    maximumAge: 0
+  }
+);
+
+function validasiLokasi(lat, lon) {
+  const jarakLat = Math.abs(lat - kelasLat);
+  const jarakLon = Math.abs(lon - kelasLon);
+  return jarakLat < radius && jarakLon < radius;
+}
+
 // =======================
 // 📷 START CAMERA
 // =======================
-navigator.mediaDevices.getUserMedia({ video: true })
-.then(stream => {
-  document.getElementById("video").srcObject = stream;
-});
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user" },
+      audio: false
+    });
+    video.srcObject = stream;
+  } catch (err) {
+    alert("Izinkan akses kamera!");
+  }
+}
 
 // =======================
 // 📸 CEK FOTO GELAP
@@ -69,92 +74,92 @@ function cekFotoValid(canvas) {
   }
 
   const avg = total / (data.length / 4) / 3;
-
-  return avg > 40; // kalau terlalu gelap → false
+  return avg > 40;
 }
 
 // =======================
 // 📸 AMBIL FOTO
 // =======================
-function ambilFoto() {
-  const video = document.getElementById("video");
-
-  const canvas = document.createElement("canvas");
+btnSnap.addEventListener('click', () => {
+  const context = canvas.getContext('2d');
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
-
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0);
+  context.drawImage(video, 0, 0);
 
   if (!cekFotoValid(canvas)) {
-    alert("❌ Gambar tidak valid / terlalu gelap!");
+    alert("❌ Gambar/objek belum tertangkap!");
     return;
   }
 
-  foto = canvas.toDataURL("image/png");
+  const data = canvas.toDataURL('image/png');
+  canvasImg.src = data;
+  foto = data;
 
-  document.getElementById("hasil").src = foto;
-  document.getElementById("hasil").style.display = "block";
-  video.style.display = "none";
+  // freeze waktu
+  frozenTime = new Date();
 
-  // 🧊 FREEZE WAKTU
-  timestamp = new Date();
+  video.style.display = 'none';
+  canvasImg.style.display = 'block';
+  liveIndicator.innerHTML = '<div class="dot" style="background:gray"></div> CAPTURED';
 
-  document.getElementById("status").innerText =
-    "📸 Foto berhasil diambil";
-}
+  // STOP UPDATE TIME
+  stopClock = true;
+});
 
 // =======================
 // 🔄 ULANG FOTO
 // =======================
-function ulangFoto() {
+btnRetake.addEventListener('click', () => {
+  video.style.display = 'block';
+  canvasImg.style.display = 'none';
+  liveIndicator.innerHTML = '<div class="dot"></div> LIVE PREVIEW';
+
   foto = null;
-  document.getElementById("video").style.display = "block";
-  document.getElementById("hasil").style.display = "none";
-
-  timestamp = null;
-
-  document.getElementById("status").innerText =
-    "🔄 Silakan ambil ulang foto";
-}
+  frozenTime = null;
+  stopClock = false;
+});
 
 // =======================
-// 📍 AMBIL LOKASI
+// ⏰ JAM
 // =======================
-navigator.geolocation.getCurrentPosition(
-  pos => {
-    lat = pos.coords.latitude;
-    lon = pos.coords.longitude;
+let stopClock = false;
 
-    document.getElementById("lokasi").innerText =
-      `📍 ${lat.toFixed(6)}, ${lon.toFixed(6)}`;
-  },
-  err => {
-    document.getElementById("lokasi").innerText =
-      "❌ Lokasi ditolak";
-  },
-  {
-    enableHighAccuracy: true,
-    timeout: 10000,
-    maximumAge: 0
+function updateTime() {
+  if (stopClock && frozenTime) {
+    const t = frozenTime;
+    tampilkanWaktu(t);
+    return;
   }
-);
 
-// =======================
-// 📍 VALIDASI LOKASI
-// =======================
-function validasiLokasi(lat, lon) {
-  const jarakLat = Math.abs(lat - kelasLat);
-  const jarakLon = Math.abs(lon - kelasLon);
-  return jarakLat < radius && jarakLon < radius;
+  const now = new Date();
+  tampilkanWaktu(now);
 }
+
+function tampilkanWaktu(now) {
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+
+  document.getElementById('large-time').textContent = `${hours}:${minutes}`;
+
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const day = String(now.getDate()).padStart(2, '0');
+  const month = months[now.getMonth()];
+  const year = now.getFullYear();
+
+  document.getElementById('current-date-time').textContent =
+    `${day} ${month} ${year} • ${hours}:${minutes}:${seconds} WIB`;
+}
+
+setInterval(updateTime, 1000);
+updateTime();
 
 // =======================
 // ✅ ABSEN
 // =======================
 function absen() {
-  const nama = document.getElementById("nama").value.trim();
-  const nim = document.getElementById("nim").value.trim();
+  const nama = document.getElementById("input-nama").value.trim();
+  const nim = document.getElementById("input-nim").value.trim();
 
   if (!nama) {
     alert("❌ Nama belum diisi");
@@ -181,19 +186,11 @@ function absen() {
     return;
   }
 
-  document.getElementById("status").innerText =
-    "✅ Presensi berhasil!";
-
-  console.log({
-    nama,
-    nim,
-    lat,
-    lon,
-    foto,
-    waktu: timestamp
-  });
+  alert("✅ Presensi berhasil!");
 }
-</script>
 
-</body>
-</html>
+// hook tombol
+document.querySelector(".btn-submit").addEventListener("click", absen);
+
+startCamera();
+</script>
